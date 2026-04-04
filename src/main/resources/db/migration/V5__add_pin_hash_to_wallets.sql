@@ -1,0 +1,1 @@
+ALTER TABLE wallets ADD COLUMN pin_hash VARCHAR(255);
