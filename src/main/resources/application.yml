@@ -42,7 +42,13 @@ application:
     refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800000}
   wallet:
     max-daily-limit: ${WALLET_MAX_DAILY_LIMIT:50000}
+  currency:
+    supported: USD,KHR
+    wallet-currencies: USD,KHR
+    api-url: https://v6.exchangerate-api.com
+    api-key: ${EXCHANGE_RATE_API_KEY:}
+    refresh-interval-ms: 3600000
 
 logging:
   pattern:
-    console: '${CONSOLE_LOG_PATTERN:%green(%d{HH:mm:ss.SSS}) %blue(%-5level) %red([%thread]) %yellow(%logger{15}) - %cyan(%msg%n)}'
+    console: "${CONSOLE_LOG_PATTERN:%green(%d{HH:mm:ss.SSS}) %blue(%-5level) %red([%thread]) %yellow(%logger{15}) - %cyan(%msg%n)}"

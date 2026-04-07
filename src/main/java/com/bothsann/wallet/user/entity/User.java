@@ -47,6 +47,9 @@ public class User extends AuditableEntity implements UserDetails {
     @Column(name = "is_active", nullable = false)
     private boolean isActive;
 
+    @Column(name = "pin_hash")
+    private String pinHash;
+
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));

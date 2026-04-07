@@ -25,6 +25,12 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     Optional<Transaction> findByIdAndWalletId(UUID id, UUID walletId);
 
+    Page<Transaction> findByWalletIdIn(List<UUID> walletIds, Pageable pageable);
+
+    Page<Transaction> findByWalletIdInAndType(List<UUID> walletIds, TransactionType type, Pageable pageable);
+
+    Optional<Transaction> findByIdAndWalletIdIn(UUID id, List<UUID> walletIds);
+
     @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
            "WHERE t.wallet.id = :walletId " +
            "AND t.type IN :types " +

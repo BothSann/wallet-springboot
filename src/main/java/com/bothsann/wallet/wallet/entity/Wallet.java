@@ -6,7 +6,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.OneToOne;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import lombok.AllArgsConstructor;
@@ -26,8 +26,8 @@ import java.math.BigDecimal;
 @Builder
 public class Wallet extends AuditableEntity {
 
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false, unique = true)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
     @Column(precision = 19, scale = 4, nullable = false)
@@ -39,8 +39,9 @@ public class Wallet extends AuditableEntity {
     @Version
     private Long version;
 
-    @Column(name = "pin_hash")
-    private String pinHash;
+    @Builder.Default
+    @Column(name = "is_default", nullable = false)
+    private boolean isDefault = false;
 
     @Builder.Default
     @Column(name = "daily_limit", nullable = false)

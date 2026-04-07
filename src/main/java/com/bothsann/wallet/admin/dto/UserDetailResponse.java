@@ -6,6 +6,7 @@ import com.bothsann.wallet.wallet.dto.WalletResponse;
 import com.bothsann.wallet.wallet.entity.Wallet;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 public record UserDetailResponse(
@@ -16,9 +17,9 @@ public record UserDetailResponse(
         Role role,
         boolean isActive,
         LocalDateTime createdAt,
-        WalletResponse wallet
+        List<WalletResponse> wallets
 ) {
-    public static UserDetailResponse from(User user, Wallet wallet) {
+    public static UserDetailResponse from(User user, List<Wallet> wallets) {
         return new UserDetailResponse(
                 user.getId(),
                 user.getFullName(),
@@ -27,7 +28,7 @@ public record UserDetailResponse(
                 user.getRole(),
                 user.isActive(),
                 user.getCreatedAt(),
-                WalletResponse.from(wallet)
+                wallets.stream().map(WalletResponse::from).toList()
         );
     }
 }

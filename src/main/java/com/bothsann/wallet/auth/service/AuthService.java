@@ -7,10 +7,12 @@ import com.bothsann.wallet.auth.dto.RegisterRequest;
 import com.bothsann.wallet.auth.entity.RefreshToken;
 import com.bothsann.wallet.auth.repository.RefreshTokenRepository;
 import com.bothsann.wallet.shared.config.JwtProperties;
+import com.bothsann.wallet.shared.currency.CurrencyProperties;
 import com.bothsann.wallet.shared.enums.Role;
 import com.bothsann.wallet.shared.exception.AccountDeactivatedException;
 import com.bothsann.wallet.shared.exception.EmailAlreadyExistsException;
 import com.bothsann.wallet.shared.exception.InvalidTokenException;
+import com.bothsann.wallet.shared.exception.UnsupportedCurrencyException;
 import com.bothsann.wallet.shared.exception.UserNotFoundException;
 import com.bothsann.wallet.user.entity.User;
 import com.bothsann.wallet.user.repository.UserRepository;
@@ -39,6 +41,7 @@ public class AuthService {
     private final JwtProperties jwtProperties;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
+    private final CurrencyProperties currencyProperties;
 
     public AuthResponse register(RegisterRequest req) {
         if (userRepository.existsByEmail(req.email())) {
@@ -53,10 +56,17 @@ public class AuthService {
                 .isActive(true)
                 .build();
         user = userRepository.save(user);
+        String currency = (req.currency() != null && !req.currency().isBlank())
+                ? req.currency().toUpperCase()
+                : "USD";
+        if (!currencyProperties.getWalletCurrencies().contains(currency)) {
+            throw new UnsupportedCurrencyException(currency, currencyProperties.getWalletCurrencies());
+        }
         walletRepository.save(Wallet.builder()
                 .user(user)
                 .balance(BigDecimal.ZERO)
-                .currency("USD")
+                .currency(currency)
+                .isDefault(true)
                 .build());
         return buildAuthResponse(user);
     }

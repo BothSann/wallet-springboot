@@ -5,7 +5,6 @@ import com.bothsann.wallet.admin.dto.UserSummaryResponse;
 import com.bothsann.wallet.shared.dto.PageResponse;
 import com.bothsann.wallet.shared.exception.SelfDeactivationException;
 import com.bothsann.wallet.shared.exception.UserNotFoundException;
-import com.bothsann.wallet.shared.exception.WalletNotFoundException;
 import com.bothsann.wallet.user.entity.User;
 import com.bothsann.wallet.user.repository.UserRepository;
 import com.bothsann.wallet.wallet.dto.WalletResponse;
@@ -16,6 +15,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -33,9 +33,8 @@ public class AdminService {
     public UserDetailResponse getUserById(UUID id) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new UserNotFoundException(id));
-        Wallet wallet = walletRepository.findByUserId(id)
-                .orElseThrow(WalletNotFoundException::new);
-        return UserDetailResponse.from(user, wallet);
+        List<Wallet> wallets = walletRepository.findAllByUserId(id);
+        return UserDetailResponse.from(user, wallets);
     }
 
     @Transactional

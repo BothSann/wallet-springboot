@@ -10,6 +10,7 @@ public record WalletResponse(
         UUID id,
         BigDecimal balance,
         String currency,
+        boolean isDefault,
         LocalDateTime updatedAt
 ) {
     public static WalletResponse from(Wallet wallet) {
@@ -17,6 +18,7 @@ public record WalletResponse(
                 wallet.getId(),
                 wallet.getBalance(),
                 wallet.getCurrency(),
+                wallet.isDefault(),
                 wallet.getUpdatedAt()
         );
     }

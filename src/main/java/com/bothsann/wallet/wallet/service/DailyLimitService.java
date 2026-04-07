@@ -1,5 +1,6 @@
 package com.bothsann.wallet.wallet.service;
 
+import com.bothsann.wallet.shared.currency.ExchangeRateService;
 import com.bothsann.wallet.shared.enums.TransactionStatus;
 import com.bothsann.wallet.shared.enums.TransactionType;
 import com.bothsann.wallet.shared.exception.DailyLimitExceededException;
@@ -20,8 +21,9 @@ import java.util.UUID;
 public class DailyLimitService {
 
     private final TransactionRepository transactionRepository;
+    private final ExchangeRateService exchangeRateService;
 
-    public BigDecimal getTodaySpend(UUID walletId) {
+    private BigDecimal getTodaySpend(UUID walletId) {
         LocalDateTime todayMidnightUtc = LocalDate.now(ZoneOffset.UTC).atStartOfDay();
         return transactionRepository.sumAmountByWalletIdAndTypeInAndStatusAndCreatedAtAfter(
                 walletId,
@@ -31,10 +33,21 @@ public class DailyLimitService {
         );
     }
 
+    /** Today's spend converted to USD — used for limit display and enforcement. */
+    public BigDecimal getTodaySpendInUsd(UUID walletId, String walletCurrency) {
+        BigDecimal rawSpend = getTodaySpend(walletId);
+        if ("USD".equals(walletCurrency)) return rawSpend;
+        return exchangeRateService.convert(rawSpend, walletCurrency, "USD");
+    }
+
     public void checkLimit(Wallet wallet, BigDecimal requestedAmount) {
-        BigDecimal todaySpend = getTodaySpend(wallet.getId());
-        if (todaySpend.add(requestedAmount).compareTo(wallet.getDailyLimit()) > 0) {
-            throw new DailyLimitExceededException(wallet.getDailyLimit(), todaySpend, requestedAmount);
+        String currency = wallet.getCurrency();
+        BigDecimal requestedUsd = "USD".equals(currency)
+                ? requestedAmount
+                : exchangeRateService.convert(requestedAmount, currency, "USD");
+        BigDecimal todaySpendUsd = getTodaySpendInUsd(wallet.getId(), currency);
+        if (todaySpendUsd.add(requestedUsd).compareTo(wallet.getDailyLimit()) > 0) {
+            throw new DailyLimitExceededException(wallet.getDailyLimit(), todaySpendUsd, requestedUsd);
         }
     }
 }

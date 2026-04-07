@@ -6,6 +6,7 @@ import com.bothsann.wallet.shared.exception.TransactionNotFoundException;
 import com.bothsann.wallet.shared.exception.WalletNotFoundException;
 import com.bothsann.wallet.transaction.dto.TransactionResponse;
 import com.bothsann.wallet.transaction.repository.TransactionRepository;
+import com.bothsann.wallet.wallet.entity.Wallet;
 import com.bothsann.wallet.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -13,6 +14,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -24,23 +26,29 @@ public class TransactionService {
     private final TransactionRepository transactionRepository;
 
     public PageResponse<TransactionResponse> getHistory(UUID userId, TransactionType type, Pageable pageable) {
-        var wallet = walletRepository.findByUserId(userId)
-                .orElseThrow(WalletNotFoundException::new);
+        List<UUID> walletIds = walletRepository.findAllByUserId(userId)
+                .stream().map(Wallet::getId).toList();
+        if (walletIds.isEmpty()) {
+            throw new WalletNotFoundException();
+        }
 
         Page<TransactionResponse> page = type != null
-                ? transactionRepository.findByWalletIdAndType(wallet.getId(), type, pageable)
+                ? transactionRepository.findByWalletIdInAndType(walletIds, type, pageable)
                         .map(TransactionResponse::from)
-                : transactionRepository.findByWalletId(wallet.getId(), pageable)
+                : transactionRepository.findByWalletIdIn(walletIds, pageable)
                         .map(TransactionResponse::from);
 
         return PageResponse.of(page);
     }
 
     public TransactionResponse getById(UUID userId, UUID transactionId) {
-        var wallet = walletRepository.findByUserId(userId)
-                .orElseThrow(WalletNotFoundException::new);
+        List<UUID> walletIds = walletRepository.findAllByUserId(userId)
+                .stream().map(Wallet::getId).toList();
+        if (walletIds.isEmpty()) {
+            throw new WalletNotFoundException();
+        }
 
-        return transactionRepository.findByIdAndWalletId(transactionId, wallet.getId())
+        return transactionRepository.findByIdAndWalletIdIn(transactionId, walletIds)
                 .map(TransactionResponse::from)
                 .orElseThrow(TransactionNotFoundException::new);
     }

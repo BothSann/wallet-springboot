@@ -1,7 +1,9 @@
 package com.bothsann.wallet.wallet.service;
 
+import com.bothsann.wallet.shared.currency.CurrencyProperties;
 import com.bothsann.wallet.shared.enums.TransactionStatus;
 import com.bothsann.wallet.shared.enums.TransactionType;
+import com.bothsann.wallet.shared.currency.ExchangeRateService;
 import com.bothsann.wallet.shared.event.DepositSuccessEvent;
 import com.bothsann.wallet.shared.event.TransferReceivedEvent;
 import com.bothsann.wallet.shared.exception.DailyLimitCapExceededException;
@@ -11,13 +13,16 @@ import com.bothsann.wallet.shared.exception.InvalidPinException;
 import com.bothsann.wallet.shared.exception.PinAlreadySetException;
 import com.bothsann.wallet.shared.exception.PinNotSetException;
 import com.bothsann.wallet.shared.exception.SelfTransferException;
+import com.bothsann.wallet.shared.exception.UnsupportedCurrencyException;
 import com.bothsann.wallet.shared.exception.UserNotFoundException;
 import com.bothsann.wallet.shared.exception.WalletNotFoundException;
 import com.bothsann.wallet.transaction.dto.TransactionResponse;
 import com.bothsann.wallet.transaction.entity.Transaction;
 import com.bothsann.wallet.transaction.repository.TransactionRepository;
+import com.bothsann.wallet.user.entity.User;
 import com.bothsann.wallet.user.repository.UserRepository;
 import com.bothsann.wallet.wallet.dto.ChangePinRequest;
+import com.bothsann.wallet.wallet.dto.CreateWalletRequest;
 import com.bothsann.wallet.wallet.dto.DailyLimitResponse;
 import com.bothsann.wallet.wallet.dto.DepositRequest;
 import com.bothsann.wallet.wallet.dto.SetPinRequest;
@@ -38,6 +43,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -51,64 +57,90 @@ public class WalletService {
     private final PasswordEncoder passwordEncoder;
     private final DailyLimitService dailyLimitService;
     private final WalletProperties walletProperties;
+    private final CurrencyProperties currencyProperties;
     private final ApplicationEventPublisher eventPublisher;
+    private final ExchangeRateService exchangeRateService;
 
     @Transactional(readOnly = true)
-    public WalletResponse getWallet(UUID userId) {
-        Wallet wallet = walletRepository.findByUserId(userId)
+    public List<WalletResponse> listWallets(UUID userId) {
+        return walletRepository.findAllByUserId(userId)
+                .stream()
+                .map(WalletResponse::from)
+                .toList();
+    }
+
+    public WalletResponse createWallet(UUID userId, CreateWalletRequest req) {
+        String currency = req.currency().toUpperCase();
+        if (!currencyProperties.getWalletCurrencies().contains(currency)) {
+            throw new UnsupportedCurrencyException(currency, currencyProperties.getWalletCurrencies());
+        }
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException(userId.toString()));
+        Wallet wallet = walletRepository.save(Wallet.builder()
+                .user(user)
+                .balance(BigDecimal.ZERO)
+                .currency(currency)
+                .isDefault(false)
+                .build());
+        return WalletResponse.from(wallet);
+    }
+
+    @Transactional(readOnly = true)
+    public WalletResponse getWallet(UUID userId, UUID walletId) {
+        Wallet wallet = walletRepository.findByIdAndUserId(walletId, userId)
                 .orElseThrow(WalletNotFoundException::new);
         return WalletResponse.from(wallet);
     }
 
     public void setPin(UUID userId, SetPinRequest req) {
-        Wallet wallet = walletRepository.findByUserId(userId)
-                .orElseThrow(WalletNotFoundException::new);
-        if (wallet.getPinHash() != null) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException(userId.toString()));
+        if (user.getPinHash() != null) {
             throw new PinAlreadySetException();
         }
-        wallet.setPinHash(passwordEncoder.encode(req.pin()));
-        walletRepository.save(wallet);
+        user.setPinHash(passwordEncoder.encode(req.pin()));
+        userRepository.save(user);
     }
 
     public void changePin(UUID userId, ChangePinRequest req) {
-        Wallet wallet = walletRepository.findByUserId(userId)
-                .orElseThrow(WalletNotFoundException::new);
-        if (wallet.getPinHash() == null) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException(userId.toString()));
+        if (user.getPinHash() == null) {
             throw new PinNotSetException();
         }
-        if (!passwordEncoder.matches(req.currentPin(), wallet.getPinHash())) {
+        if (!passwordEncoder.matches(req.currentPin(), user.getPinHash())) {
             throw new InvalidPinException();
         }
-        wallet.setPinHash(passwordEncoder.encode(req.newPin()));
-        walletRepository.save(wallet);
+        user.setPinHash(passwordEncoder.encode(req.newPin()));
+        userRepository.save(user);
     }
 
     @Transactional(readOnly = true)
-    public DailyLimitResponse getDailyLimitStatus(UUID userId) {
-        Wallet wallet = walletRepository.findByUserId(userId)
+    public DailyLimitResponse getDailyLimitStatus(UUID userId, UUID walletId) {
+        Wallet wallet = walletRepository.findByIdAndUserId(walletId, userId)
                 .orElseThrow(WalletNotFoundException::new);
-        BigDecimal todaySpend = dailyLimitService.getTodaySpend(wallet.getId());
+        BigDecimal todaySpend = dailyLimitService.getTodaySpendInUsd(wallet.getId(), wallet.getCurrency());
         BigDecimal remaining = wallet.getDailyLimit().subtract(todaySpend);
         Instant resetAt = LocalDate.now(ZoneOffset.UTC).plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC);
         return new DailyLimitResponse(wallet.getDailyLimit(), todaySpend, remaining, resetAt);
     }
 
-    public DailyLimitResponse updateDailyLimit(UUID userId, UpdateDailyLimitRequest req) {
-        Wallet wallet = walletRepository.findByUserId(userId)
+    public DailyLimitResponse updateDailyLimit(UUID userId, UUID walletId, UpdateDailyLimitRequest req) {
+        Wallet wallet = walletRepository.findByIdAndUserId(walletId, userId)
                 .orElseThrow(WalletNotFoundException::new);
         if (req.dailyLimit().compareTo(walletProperties.getMaxDailyLimit()) > 0) {
             throw new DailyLimitCapExceededException(walletProperties.getMaxDailyLimit());
         }
         wallet.setDailyLimit(req.dailyLimit());
         walletRepository.save(wallet);
-        return getDailyLimitStatus(userId);
+        return getDailyLimitStatus(userId, walletId);
     }
 
-    public TransactionResponse deposit(UUID userId, DepositRequest req, String idempotencyKey) {
+    public TransactionResponse deposit(UUID userId, UUID walletId, DepositRequest req, String idempotencyKey) {
         if (transactionRepository.existsByIdempotencyKey(idempotencyKey)) {
             throw new DuplicateIdempotencyKeyException(idempotencyKey);
         }
-        Wallet wallet = walletRepository.findByUserId(userId)
+        Wallet wallet = walletRepository.findByIdAndUserId(walletId, userId)
                 .orElseThrow(WalletNotFoundException::new);
 
         BigDecimal balanceBefore = wallet.getBalance();
@@ -140,14 +172,14 @@ public class WalletService {
         return TransactionResponse.from(tx);
     }
 
-    public TransactionResponse withdraw(UUID userId, WithdrawRequest req, String idempotencyKey) {
+    public TransactionResponse withdraw(UUID userId, UUID walletId, WithdrawRequest req, String idempotencyKey) {
         if (transactionRepository.existsByIdempotencyKey(idempotencyKey)) {
             throw new DuplicateIdempotencyKeyException(idempotencyKey);
         }
-        Wallet wallet = walletRepository.findByUserId(userId)
+        Wallet wallet = walletRepository.findByIdAndUserId(walletId, userId)
                 .orElseThrow(WalletNotFoundException::new);
 
-        verifyPin(wallet, req.pin());
+        verifyPin(wallet.getUser(), req.pin());
         dailyLimitService.checkLimit(wallet, req.amount());
 
         if (wallet.getBalance().compareTo(req.amount()) < 0) {
@@ -181,10 +213,10 @@ public class WalletService {
             throw new DuplicateIdempotencyKeyException(idempotencyKey);
         }
 
-        Wallet senderWallet = walletRepository.findByUserId(senderId)
+        Wallet senderWallet = walletRepository.findByIdAndUserId(req.fromWalletId(), senderId)
                 .orElseThrow(WalletNotFoundException::new);
 
-        verifyPin(senderWallet, req.pin());
+        verifyPin(senderWallet.getUser(), req.pin());
         dailyLimitService.checkLimit(senderWallet, req.amount());
 
         var recipient = userRepository.findByEmail(req.recipientEmail())
@@ -194,11 +226,25 @@ public class WalletService {
             throw new SelfTransferException();
         }
 
-        Wallet recipientWallet = walletRepository.findByUserId(recipient.getId())
+        Wallet recipientWallet = walletRepository.findByIdAndUserId(req.recipientWalletId(), recipient.getId())
                 .orElseThrow(WalletNotFoundException::new);
 
         if (senderWallet.getBalance().compareTo(req.amount()) < 0) {
             throw new InsufficientBalanceException(senderWallet.getBalance(), req.amount());
+        }
+
+        // Resolve currency conversion if wallets use different currencies
+        String senderCurrency = senderWallet.getCurrency();
+        String recipientCurrency = recipientWallet.getCurrency();
+        boolean isCrossCurrency = !senderCurrency.equals(recipientCurrency);
+
+        BigDecimal senderAmount = req.amount();
+        BigDecimal recipientAmount = senderAmount;
+        BigDecimal appliedRate = null;
+
+        if (isCrossCurrency) {
+            appliedRate = exchangeRateService.getRate(senderCurrency, recipientCurrency);
+            recipientAmount = exchangeRateService.convert(senderAmount, senderCurrency, recipientCurrency);
         }
 
         BigDecimal senderBalanceBefore = senderWallet.getBalance();
@@ -209,7 +255,7 @@ public class WalletService {
                 .idempotencyKey(idempotencyKey)
                 .type(TransactionType.TRANSFER_OUT)
                 .status(TransactionStatus.PENDING)
-                .amount(req.amount())
+                .amount(senderAmount)
                 .balanceBefore(senderBalanceBefore)
                 .balanceAfter(senderBalanceBefore)
                 .description(req.description())
@@ -220,16 +266,17 @@ public class WalletService {
                 .idempotencyKey(idempotencyKey + "-in")
                 .type(TransactionType.TRANSFER_IN)
                 .status(TransactionStatus.PENDING)
-                .amount(req.amount())
+                .amount(recipientAmount)
                 .balanceBefore(recipientBalanceBefore)
                 .balanceAfter(recipientBalanceBefore)
                 .description(req.description())
+                .exchangeRate(appliedRate)
                 .build());
 
-        senderWallet.setBalance(senderBalanceBefore.subtract(req.amount()));
+        senderWallet.setBalance(senderBalanceBefore.subtract(senderAmount));
         walletRepository.save(senderWallet);
 
-        recipientWallet.setBalance(recipientBalanceBefore.add(req.amount()));
+        recipientWallet.setBalance(recipientBalanceBefore.add(recipientAmount));
         walletRepository.save(recipientWallet);
 
         senderTx.setStatus(TransactionStatus.SUCCESS);
@@ -244,18 +291,18 @@ public class WalletService {
                 recipient.getEmail(),
                 recipient.getFullName(),
                 senderWallet.getUser().getEmail(),
-                req.amount(),
+                recipientAmount,
                 recipientWallet.getBalance()
         ));
 
         return TransactionResponse.from(senderTx);
     }
 
-    private void verifyPin(Wallet wallet, String submittedPin) {
-        if (wallet.getPinHash() == null) {
+    private void verifyPin(User user, String submittedPin) {
+        if (user.getPinHash() == null) {
             throw new PinNotSetException();
         }
-        if (submittedPin == null || submittedPin.isBlank() || !passwordEncoder.matches(submittedPin, wallet.getPinHash())) {
+        if (submittedPin == null || submittedPin.isBlank() || !passwordEncoder.matches(submittedPin, user.getPinHash())) {
             throw new InvalidPinException();
         }
     }

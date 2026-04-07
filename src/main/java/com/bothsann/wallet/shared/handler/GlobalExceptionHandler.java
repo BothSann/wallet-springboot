@@ -2,6 +2,8 @@ package com.bothsann.wallet.shared.handler;
 
 import com.bothsann.wallet.shared.dto.ErrorResponse;
 import com.bothsann.wallet.shared.exception.AccountDeactivatedException;
+import com.bothsann.wallet.shared.exception.ExchangeRateUnavailableException;
+import com.bothsann.wallet.shared.exception.UnsupportedCurrencyException;
 import com.bothsann.wallet.shared.exception.DailyLimitCapExceededException;
 import com.bothsann.wallet.shared.exception.DailyLimitExceededException;
 import com.bothsann.wallet.shared.exception.DuplicateIdempotencyKeyException;
@@ -129,6 +131,18 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handlePinAlreadySet(PinAlreadySetException ex, HttpServletRequest request) {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(UnsupportedCurrencyException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleUnsupportedCurrency(UnsupportedCurrencyException ex, HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(ExchangeRateUnavailableException.class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    public ErrorResponse handleExchangeRateUnavailable(ExchangeRateUnavailableException ex, HttpServletRequest request) {
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), request);
     }
 
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)

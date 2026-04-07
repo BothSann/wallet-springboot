@@ -14,9 +14,11 @@ public record TransactionResponse(
         TransactionType type,
         TransactionStatus status,
         BigDecimal amount,
+        String currency,
         BigDecimal balanceBefore,
         BigDecimal balanceAfter,
         String description,
+        BigDecimal exchangeRate,
         LocalDateTime createdAt
 ) {
     public static TransactionResponse from(Transaction tx) {
@@ -26,9 +28,11 @@ public record TransactionResponse(
                 tx.getType(),
                 tx.getStatus(),
                 tx.getAmount(),
+                tx.getWallet().getCurrency(),
                 tx.getBalanceBefore(),
                 tx.getBalanceAfter(),
                 tx.getDescription(),
+                tx.getExchangeRate(),
                 tx.getCreatedAt()
         );
     }
