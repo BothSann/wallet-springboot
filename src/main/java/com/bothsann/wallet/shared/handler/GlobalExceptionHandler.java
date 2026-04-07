@@ -13,6 +13,7 @@ import com.bothsann.wallet.shared.exception.InvalidPinException;
 import com.bothsann.wallet.shared.exception.InvalidTokenException;
 import com.bothsann.wallet.shared.exception.PinAlreadySetException;
 import com.bothsann.wallet.shared.exception.PinNotSetException;
+import com.bothsann.wallet.shared.exception.SameWalletExchangeException;
 import com.bothsann.wallet.shared.exception.SelfDeactivationException;
 import com.bothsann.wallet.shared.exception.SelfTransferException;
 import com.bothsann.wallet.shared.exception.UserNotFoundException;
@@ -89,6 +90,12 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleDuplicateIdempotencyKey(DuplicateIdempotencyKeyException ex, HttpServletRequest request) {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(SameWalletExchangeException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleSameWalletExchange(SameWalletExchangeException ex, HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request);
     }
 
     @ExceptionHandler(SelfTransferException.class)

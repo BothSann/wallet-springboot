@@ -4,6 +4,7 @@ import com.bothsann.wallet.transaction.dto.TransactionResponse;
 import com.bothsann.wallet.user.entity.User;
 import com.bothsann.wallet.wallet.dto.ChangePinRequest;
 import com.bothsann.wallet.wallet.dto.CreateWalletRequest;
+import com.bothsann.wallet.wallet.dto.ExchangeRequest;
 import com.bothsann.wallet.wallet.dto.DailyLimitResponse;
 import com.bothsann.wallet.wallet.dto.DepositRequest;
 import com.bothsann.wallet.wallet.dto.SetPinRequest;
@@ -73,6 +74,14 @@ public class WalletController {
             @Valid @RequestBody WithdrawRequest req,
             @RequestHeader("Idempotency-Key") String idempotencyKey) {
         return ResponseEntity.ok(walletService.withdraw(currentUser.getId(), walletId, req, idempotencyKey));
+    }
+
+    @PostMapping("/exchange")
+    public ResponseEntity<TransactionResponse> exchange(
+            @AuthenticationPrincipal User currentUser,
+            @Valid @RequestBody ExchangeRequest req,
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        return ResponseEntity.ok(walletService.exchange(currentUser.getId(), req, idempotencyKey));
     }
 
     @PostMapping("/transfer")

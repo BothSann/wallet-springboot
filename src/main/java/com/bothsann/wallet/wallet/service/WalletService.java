@@ -12,6 +12,7 @@ import com.bothsann.wallet.shared.exception.InsufficientBalanceException;
 import com.bothsann.wallet.shared.exception.InvalidPinException;
 import com.bothsann.wallet.shared.exception.PinAlreadySetException;
 import com.bothsann.wallet.shared.exception.PinNotSetException;
+import com.bothsann.wallet.shared.exception.SameWalletExchangeException;
 import com.bothsann.wallet.shared.exception.SelfTransferException;
 import com.bothsann.wallet.shared.exception.UnsupportedCurrencyException;
 import com.bothsann.wallet.shared.exception.UserNotFoundException;
@@ -23,6 +24,7 @@ import com.bothsann.wallet.user.entity.User;
 import com.bothsann.wallet.user.repository.UserRepository;
 import com.bothsann.wallet.wallet.dto.ChangePinRequest;
 import com.bothsann.wallet.wallet.dto.CreateWalletRequest;
+import com.bothsann.wallet.wallet.dto.ExchangeRequest;
 import com.bothsann.wallet.wallet.dto.DailyLimitResponse;
 import com.bothsann.wallet.wallet.dto.DepositRequest;
 import com.bothsann.wallet.wallet.dto.SetPinRequest;
@@ -229,63 +231,14 @@ public class WalletService {
         Wallet recipientWallet = walletRepository.findByIdAndUserId(req.recipientWalletId(), recipient.getId())
                 .orElseThrow(WalletNotFoundException::new);
 
-        if (senderWallet.getBalance().compareTo(req.amount()) < 0) {
-            throw new InsufficientBalanceException(senderWallet.getBalance(), req.amount());
-        }
+        Transaction senderTx = executeBilateralTransfer(
+                senderWallet, recipientWallet, req.amount(), req.description(), idempotencyKey);
 
-        // Resolve currency conversion if wallets use different currencies
         String senderCurrency = senderWallet.getCurrency();
         String recipientCurrency = recipientWallet.getCurrency();
-        boolean isCrossCurrency = !senderCurrency.equals(recipientCurrency);
-
-        BigDecimal senderAmount = req.amount();
-        BigDecimal recipientAmount = senderAmount;
-        BigDecimal appliedRate = null;
-
-        if (isCrossCurrency) {
-            appliedRate = exchangeRateService.getRate(senderCurrency, recipientCurrency);
-            recipientAmount = exchangeRateService.convert(senderAmount, senderCurrency, recipientCurrency);
-        }
-
-        BigDecimal senderBalanceBefore = senderWallet.getBalance();
-        BigDecimal recipientBalanceBefore = recipientWallet.getBalance();
-
-        Transaction senderTx = transactionRepository.save(Transaction.builder()
-                .wallet(senderWallet)
-                .idempotencyKey(idempotencyKey)
-                .type(TransactionType.TRANSFER_OUT)
-                .status(TransactionStatus.PENDING)
-                .amount(senderAmount)
-                .balanceBefore(senderBalanceBefore)
-                .balanceAfter(senderBalanceBefore)
-                .description(req.description())
-                .build());
-
-        Transaction recipientTx = transactionRepository.save(Transaction.builder()
-                .wallet(recipientWallet)
-                .idempotencyKey(idempotencyKey + "-in")
-                .type(TransactionType.TRANSFER_IN)
-                .status(TransactionStatus.PENDING)
-                .amount(recipientAmount)
-                .balanceBefore(recipientBalanceBefore)
-                .balanceAfter(recipientBalanceBefore)
-                .description(req.description())
-                .exchangeRate(appliedRate)
-                .build());
-
-        senderWallet.setBalance(senderBalanceBefore.subtract(senderAmount));
-        walletRepository.save(senderWallet);
-
-        recipientWallet.setBalance(recipientBalanceBefore.add(recipientAmount));
-        walletRepository.save(recipientWallet);
-
-        senderTx.setStatus(TransactionStatus.SUCCESS);
-        senderTx.setBalanceAfter(senderWallet.getBalance());
-        transactionRepository.save(senderTx);
-
-        recipientTx.setStatus(TransactionStatus.SUCCESS);
-        recipientTx.setBalanceAfter(recipientWallet.getBalance());
-        transactionRepository.save(recipientTx);
+        BigDecimal recipientAmount = senderCurrency.equals(recipientCurrency)
+                ? req.amount()
+                : exchangeRateService.convert(req.amount(), senderCurrency, recipientCurrency);
 
         eventPublisher.publishEvent(new TransferReceivedEvent(
                 recipient.getEmail(),
@@ -296,6 +249,94 @@ public class WalletService {
         ));
 
         return TransactionResponse.from(senderTx);
+    }
+
+    public TransactionResponse exchange(UUID userId, ExchangeRequest req, String idempotencyKey) {
+        if (transactionRepository.existsByIdempotencyKey(idempotencyKey)) {
+            throw new DuplicateIdempotencyKeyException(idempotencyKey);
+        }
+        if (req.fromWalletId().equals(req.toWalletId())) {
+            throw new SameWalletExchangeException();
+        }
+
+        Wallet fromWallet = walletRepository.findByIdAndUserId(req.fromWalletId(), userId)
+                .orElseThrow(WalletNotFoundException::new);
+        Wallet toWallet = walletRepository.findByIdAndUserId(req.toWalletId(), userId)
+                .orElseThrow(WalletNotFoundException::new);
+
+        verifyPin(fromWallet.getUser(), req.pin());
+
+        Transaction fromTx = executeBilateralTransfer(
+                fromWallet, toWallet, req.amount(), req.description(), idempotencyKey);
+
+        return TransactionResponse.from(fromTx);
+    }
+
+    private Transaction executeBilateralTransfer(
+            Wallet sourceWallet,
+            Wallet destinationWallet,
+            BigDecimal amount,
+            String description,
+            String idempotencyKey) {
+
+        if (sourceWallet.getBalance().compareTo(amount) < 0) {
+            throw new InsufficientBalanceException(sourceWallet.getBalance(), amount);
+        }
+
+        String fromCurrency = sourceWallet.getCurrency();
+        String toCurrency = destinationWallet.getCurrency();
+        boolean isCross = !fromCurrency.equals(toCurrency);
+
+        BigDecimal fromAmount = amount;
+        BigDecimal toAmount = amount;
+        BigDecimal rate = null;
+
+        if (isCross) {
+            rate = exchangeRateService.getRate(fromCurrency, toCurrency);
+            toAmount = exchangeRateService.convert(fromAmount, fromCurrency, toCurrency);
+        }
+
+        BigDecimal fromBefore = sourceWallet.getBalance();
+        BigDecimal toBefore = destinationWallet.getBalance();
+
+        Transaction sourceTx = transactionRepository.save(Transaction.builder()
+                .wallet(sourceWallet)
+                .idempotencyKey(idempotencyKey)
+                .type(TransactionType.TRANSFER_OUT)
+                .status(TransactionStatus.PENDING)
+                .amount(fromAmount)
+                .balanceBefore(fromBefore)
+                .balanceAfter(fromBefore)
+                .description(description)
+                .build());
+
+        Transaction destTx = transactionRepository.save(Transaction.builder()
+                .wallet(destinationWallet)
+                .idempotencyKey(idempotencyKey + "-in")
+                .type(TransactionType.TRANSFER_IN)
+                .status(TransactionStatus.PENDING)
+                .amount(toAmount)
+                .balanceBefore(toBefore)
+                .balanceAfter(toBefore)
+                .description(description)
+                .exchangeRate(rate)
+                .build());
+
+        sourceWallet.setBalance(fromBefore.subtract(fromAmount));
+        walletRepository.save(sourceWallet);
+
+        destinationWallet.setBalance(toBefore.add(toAmount));
+        walletRepository.save(destinationWallet);
+
+        sourceTx.setStatus(TransactionStatus.SUCCESS);
+        sourceTx.setBalanceAfter(sourceWallet.getBalance());
+        transactionRepository.save(sourceTx);
+
+        destTx.setStatus(TransactionStatus.SUCCESS);
+        destTx.setBalanceAfter(destinationWallet.getBalance());
+        transactionRepository.save(destTx);
+
+        return sourceTx;
     }
 
     private void verifyPin(User user, String submittedPin) {
